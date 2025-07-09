@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageVersion>5.0.0</PackageVersion>
+    <PackageVersion>6.0.0-alpha.5</PackageVersion>
     <Description>Serilog sink that writes events to Google Cloud Platform (Stackdriver) Logging.</Description>
     <Authors>Mani Gandham</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -18,7 +18,7 @@
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <TargetFrameworks>net8.0;net6.0;netstandard2.1</TargetFrameworks>
+    <TargetFrameworks>net8.0;net9.0;netstandard2.0</TargetFrameworks>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
   </PropertyGroup>
@@ -35,8 +35,8 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Serilog" Version="4.0.0" />
-    <PackageReference Condition="'$(TargetFramework)' == 'net6.0'" Include="System.Text.Encodings.Web" Version="6.0.0" />
-    <PackageReference Condition="'$(TargetFramework)' != 'net6.0'" Include="System.Text.Encodings.Web" Version="8.0.0" />
+    <PackageReference Condition="'$(TargetFramework)' == 'net9.0'" Include="System.Text.Encodings.Web" Version="9.0.0" />
+    <PackageReference Condition="'$(TargetFramework)' != 'net9.0'" Include="System.Text.Encodings.Web" Version="8.0.0" />
   </ItemGroup>
 
 </Project>
