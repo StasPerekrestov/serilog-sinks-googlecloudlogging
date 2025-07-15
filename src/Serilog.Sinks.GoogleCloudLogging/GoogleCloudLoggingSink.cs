@@ -15,7 +15,7 @@ using Serilog.Formatting;
 
 namespace Serilog.Sinks.GoogleCloudLogging;
 
-public class GoogleCloudLoggingSink : IBatchedLogEventSink
+public sealed class GoogleCloudLoggingSink : IBatchedLogEventSink
 {
     private readonly GoogleCloudLoggingSinkOptions _sinkOptions;
     private readonly LoggingServiceV2Client _client;
@@ -67,7 +67,15 @@ public class GoogleCloudLoggingSink : IBatchedLogEventSink
             : new LoggingServiceV2ClientBuilder { JsonCredentials = _sinkOptions.GoogleCredentialJson }.Build();
     }
 
-    private List<LogEntry> CreateEventsBatch(IReadOnlyCollection<LogEvent> events)
+    //For testing and benchmarking purposes
+    internal GoogleCloudLoggingSink(string projectId, ITextFormatter? textFormatter)
+    {
+        _projectId = projectId;
+        _logFormatter = new LogFormatter(textFormatter);;
+        _sinkOptions = new GoogleCloudLoggingSinkOptions(projectId, useLogCorrelation: true);
+    }
+
+    internal List<LogEntry> CreateEventsBatch(IReadOnlyCollection<LogEvent> events)
     {
         //writer is used for message template rendering
         using var writer = new StringWriter(_stringBuilder);

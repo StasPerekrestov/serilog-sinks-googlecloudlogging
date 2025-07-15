@@ -38,5 +38,10 @@
     <PackageReference Condition="'$(TargetFramework)' == 'net9.0'" Include="System.Text.Encodings.Web" Version="9.0.0" />
     <PackageReference Condition="'$(TargetFramework)' != 'net9.0'" Include="System.Text.Encodings.Web" Version="8.0.0" />
   </ItemGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>Serilog.Sinks.GoogleCloudLogging.Benchmark</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
 
 </Project>
