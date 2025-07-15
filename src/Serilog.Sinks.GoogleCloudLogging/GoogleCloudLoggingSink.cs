@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Google.Api;
@@ -24,6 +25,10 @@ public class GoogleCloudLoggingSink : IBatchedLogEventSink
     private readonly LogFormatter _logFormatter;
     private readonly Struct? _serviceContext;
 
+    /// <summary>
+    /// Because batches aren't executed concurrently, we can reuse the stringBuilder
+    /// </summary>
+    private readonly StringBuilder _stringBuilder = new StringBuilder();
 
     public GoogleCloudLoggingSink(GoogleCloudLoggingSinkOptions sinkOptions, ITextFormatter? textFormatter)
     {
@@ -62,10 +67,11 @@ public class GoogleCloudLoggingSink : IBatchedLogEventSink
             : new LoggingServiceV2ClientBuilder { JsonCredentials = _sinkOptions.GoogleCredentialJson }.Build();
     }
 
-    public Task EmitBatchAsync(IReadOnlyCollection<LogEvent> events)
+    private List<LogEntry> CreateEventsBatch(IReadOnlyCollection<LogEvent> events)
     {
-        using var writer = new StringWriter();
-        var entries = new List<LogEntry>();
+        //writer is used for message template rendering
+        using var writer = new StringWriter(_stringBuilder);
+        var entries = new List<LogEntry>(events.Count);
 
         foreach (var evnt in events)
         {
@@ -79,6 +85,12 @@ public class GoogleCloudLoggingSink : IBatchedLogEventSink
                 Debugging.SelfLog.WriteLine("Log entry is too large for Google Cloud Logging: {0}", GetLogEntryMessage(logEntry));
         }
 
+        return entries;
+    }
+
+    public Task EmitBatchAsync(IReadOnlyCollection<LogEvent> events)
+    {
+        var entries = CreateEventsBatch(events);
         return entries.Count > 0
             ? _client.WriteLogEntriesAsync(_logName, _resource, _sinkOptions.Labels, entries, CancellationToken.None)
             : Task.CompletedTask;
