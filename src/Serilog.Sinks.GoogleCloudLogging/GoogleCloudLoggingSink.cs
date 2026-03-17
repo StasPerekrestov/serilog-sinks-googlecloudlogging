@@ -64,15 +64,18 @@ public sealed class GoogleCloudLoggingSink : IBatchedLogEventSink
         // logging client for google cloud apis
         _client = _sinkOptions.GoogleCredentialJson.IsNullOrWhiteSpace()
             ? LoggingServiceV2Client.Create()
-            : new LoggingServiceV2ClientBuilder { JsonCredentials = _sinkOptions.GoogleCredentialJson }.Build();
+            : new LoggingServiceV2ClientBuilder { GoogleCredential = Google.Apis.Auth.OAuth2.CredentialFactory.FromJson<Google.Apis.Auth.OAuth2.GoogleCredential>(_sinkOptions.GoogleCredentialJson) }.Build();
     }
 
     //For testing and benchmarking purposes
     internal GoogleCloudLoggingSink(string projectId, ITextFormatter? textFormatter)
     {
         _projectId = projectId;
-        _logFormatter = new LogFormatter(textFormatter);;
+        _logFormatter = new LogFormatter(textFormatter);
         _sinkOptions = new GoogleCloudLoggingSinkOptions(projectId, useLogCorrelation: true);
+        _client = null!;
+        _resource = null!;
+        _logName = null!;
     }
 
     internal List<LogEntry> CreateEventsBatch(IReadOnlyCollection<LogEvent> events)
@@ -138,6 +141,19 @@ public sealed class GoogleCloudLoggingSink : IBatchedLogEventSink
 
         if (_serviceContext != null)
             jsonPayload.Fields.Add("serviceContext", Value.ForStruct(_serviceContext));
+
+        // format exception for Google Cloud Error Reporting
+        // see: https://cloud.google.com/error-reporting/docs/formatting-error-messages
+        if (evnt.Exception != null)
+        {
+            //uses exception property to use the same convention as the official NLog implementation target
+            jsonPayload.Fields.Add("exception", Value.ForString(evnt.Exception.ToString()));
+        }
+        else if (evnt.Level >= LogEventLevel.Error)
+        {
+            //To log an error event that is a text message
+            jsonPayload.Fields.Add("@type", Value.ForString("type.googleapis.com/google.devtools.clouderrorreporting.v1beta1.ReportedErrorEvent"));
+        }
 
         log.JsonPayload = jsonPayload;
 

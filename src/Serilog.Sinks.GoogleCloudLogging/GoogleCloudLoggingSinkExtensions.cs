@@ -36,7 +36,7 @@ public static class GoogleCloudLoggingSinkExtensions
     {
         // use provided text formatter or create one from output template 
         // formatter can be null if neither parameters are provided
-        textFormatter ??= !String.IsNullOrWhiteSpace(outputTemplate) ? new MessageTemplateTextFormatter(outputTemplate) : null;
+        textFormatter ??= !String.IsNullOrWhiteSpace(outputTemplate) ? new MessageTemplateTextFormatter(outputTemplate!) : null;
 
         var batchingOptions = new BatchingOptions
         {

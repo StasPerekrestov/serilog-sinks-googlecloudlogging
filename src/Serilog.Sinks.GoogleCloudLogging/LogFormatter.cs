@@ -50,7 +50,8 @@ internal partial class LogFormatter
                 if (writer.GetStringBuilder().Length > 0)
                     writer.WriteLine();
 
-                writer.Write(e.Exception.ToString());
+                //Exception message stacktrace goes as a separate exception property
+                writer.Write(e.Exception.Message);
             }
         }
 

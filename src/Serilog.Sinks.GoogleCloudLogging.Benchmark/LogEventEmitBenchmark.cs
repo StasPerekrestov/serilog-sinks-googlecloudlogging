@@ -7,6 +7,7 @@ using Serilog.Parsing;
 namespace Serilog.Sinks.GoogleCloudLogging.Benchmark;
 
 [MemoryDiagnoser]
+[SimpleJob(runtimeMoniker: RuntimeMoniker.Net10_0, baseline: false)]
 [SimpleJob(runtimeMoniker: RuntimeMoniker.Net90, baseline: false)]
 [SimpleJob(runtimeMoniker: RuntimeMoniker.Net80, baseline: true)]
 public class LogEventEmitBenchmark
