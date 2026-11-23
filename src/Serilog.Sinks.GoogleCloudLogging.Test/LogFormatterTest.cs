@@ -4,13 +4,96 @@ using System.IO;
 using System.Linq;
 using Google.Protobuf.WellKnownTypes;
 using Serilog.Events;
+using Serilog.Parsing;
 using Xunit;
 
 namespace Serilog.Sinks.GoogleCloudLogging.Test;
 
+[Collection("SelfLog")]
 public class LogFormatterTest
 {
     private readonly LogFormatter _formatter = new(null);
+
+    [Theory]
+    [InlineData("a literal message")]
+    [InlineData("Escaped {{braces}} in the message")]
+    public void WillRenderLiteralTokensExactlyAsSerilogDoes(string template)
+    {
+        var logEvent = new LogEvent(DateTimeOffset.UtcNow, LogEventLevel.Information, null,
+            new MessageTemplateParser().Parse(template), Array.Empty<LogEventProperty>());
+        using var writer = new StringWriter();
+
+        Assert.Equal(logEvent.RenderMessage(), _formatter.RenderEventMessage(logEvent, writer));
+    }
+
+    [Theory]
+    [InlineData("{Body:l}", "quote \" and \u00e9")]
+    [InlineData("{Body,30:l}", "quote \" and \u00e9")]
+    [InlineData("Payload {Body,30:l}", "quote \" and \u00e9")]
+    [InlineData("{Body}", "quote \" and \u00e9")]
+    [InlineData("{Body:l}", "")]
+    [InlineData("{Body:l}", null)]
+    public void WillRenderStringPropertiesExactlyAsSerilogDoes(string template, string body)
+    {
+        var logEvent = new LogEvent(DateTimeOffset.UtcNow, LogEventLevel.Information, null,
+            new MessageTemplateParser().Parse(template), [new("Body", new ScalarValue(body))]);
+        using var writer = new StringWriter();
+
+        Assert.Equal(logEvent.RenderMessage(), _formatter.RenderEventMessage(logEvent, writer));
+    }
+
+    [Fact]
+    public void WillReuseTheStringForAnUnalignedLiteralProperty()
+    {
+        var body = new string('x', 100_000);
+        var logEvent = new LogEvent(DateTimeOffset.UtcNow, LogEventLevel.Information, null,
+            new MessageTemplateParser().Parse("{Body:l}"), [new("Body", new ScalarValue(body))]);
+        using var writer = new StringWriter();
+
+        Assert.Same(body, _formatter.RenderEventMessage(logEvent, writer));
+    }
+
+    [Fact]
+    public void WillNotGrowTheRenderBufferForAPrefixedLiteralProperty()
+    {
+        var logEvent = new LogEvent(DateTimeOffset.UtcNow, LogEventLevel.Information, null,
+            new MessageTemplateParser().Parse("Payload {{raw}}: {Body:l}"),
+            [new("Body", new ScalarValue(new string('x', 20_000)))]);
+        using var writer = new StringWriter();
+        var capacity = writer.GetStringBuilder().Capacity;
+
+        Assert.Equal(logEvent.RenderMessage(), _formatter.RenderEventMessage(logEvent, writer));
+        Assert.Equal(capacity, writer.GetStringBuilder().Capacity);
+    }
+
+    [Theory]
+    [InlineData("{Body:l}")]
+    [InlineData("Payload {Body:l}")]
+    public void WillPreserveCustomScalarRenderingForLiteralProperties(string template)
+    {
+        var logEvent = new LogEvent(DateTimeOffset.UtcNow, LogEventLevel.Information, null,
+            new MessageTemplateParser().Parse(template), [new("Body", new CustomScalar())]);
+        using var writer = new StringWriter();
+
+        Assert.Equal(logEvent.RenderMessage(), _formatter.RenderEventMessage(logEvent, writer));
+    }
+
+    [Fact]
+    public void WillUseTheTemplateWhenADefaultFormatSpecifierIsInvalid()
+    {
+        var template = new MessageTemplateParser().Parse("Count: {Count:l}");
+        var logEvent = new LogEvent(DateTimeOffset.UtcNow, LogEventLevel.Information, null,
+            template, [new("Count", new ScalarValue(17))]);
+        using var writer = new StringWriter();
+
+        Assert.Equal(template.Text, _formatter.RenderEventMessage(logEvent, writer));
+    }
+
+    private sealed class CustomScalar() : ScalarValue("raw")
+    {
+        public override void Render(TextWriter output, string format = null, IFormatProvider formatProvider = null) =>
+            output.Write("custom");
+    }
 
     [Theory]
     [InlineData(0)]

@@ -5,6 +5,10 @@ Readme: https://github.com/manigandham/serilog-sinks-googlecloudlogging/blob/mas
 ## Unreleased
 
 -   Reduced allocations and formatting overhead for sequence properties by building protobuf lists directly.
+-   Bounded the source log name cache per sink and stopped retaining oversized message render buffers.
+-   Split large batches by protobuf request size and exclude acknowledged chunks from Serilog retries and failure notifications.
+-   Skip malformed and oversized entries without failing healthy entries. With `WriteTo.GoogleCloudLogging()`, report each skip as an individual permanent failure and suppress repeat notifications on retry.
+-   Keep the `WriteTo.GoogleCloudLogging()` batcher running when a listener, fallback sink, or `SelfLog` output throws during failure reporting.
 
 ## 5.0.0
 

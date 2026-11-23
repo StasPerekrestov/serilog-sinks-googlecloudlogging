@@ -17,7 +17,7 @@ public static class GoogleCloudLoggingSinkExtensions
     /// <param name="sinkOptions">Google Cloud Logging sink options.</param>
     /// <param name="batchSizeLimit">The maximum number of events to include in a single batch. The default is 100.</param>
     /// <param name="period">The time to wait between checking for event batches. The default is five seconds.</param>
-    /// <param name="queueLimit">Maximum number of events in the queue. If not specified, uses an unbounded queue.</param>
+    /// <param name="queueLimit">Maximum number of queued events (not bytes). New events are dropped when the queue is full. If not specified, uses an unbounded queue.</param>
     /// <param name="outputTemplate">A message template describing the format used to write to the sink.</param>
     /// <param name="textFormatter">Custom formatter for of log events. Will override output template parameter.</param>
     /// <param name="restrictedToMinimumLevel">The minimum level for events passed through the sink. Ignored when <paramref name="levelSwitch"/> is specified.</param>
@@ -47,7 +47,7 @@ public static class GoogleCloudLoggingSinkExtensions
 
         var sink = new GoogleCloudLoggingSink(sinkOptions, textFormatter);
 
-        return loggerConfiguration.Sink(sink, batchingOptions, restrictedToMinimumLevel, levelSwitch);
+        return loggerConfiguration.Sink(sink.CreateBatchingSink(batchingOptions), restrictedToMinimumLevel, levelSwitch);
     }
 
     /// <summary>

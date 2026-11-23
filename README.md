@@ -64,11 +64,22 @@ This library uses the [Google Cloud .NET](https://cloud.google.com/dotnet/docs) 
 ### Log Output
 
 -   Serilog is designed for **[structured logging](https://github.com/serilog/serilog/wiki/Structured-Data)** which is fully supported by Google Cloud. Logs are sent as a JSON object (`JsonPayload` in the protobuf API) with labels, properties, metadata and any other data like stack traces automatically attached.
+-   A custom text formatter controls the `message` string; it does not replace the structured payload. Prefer the default formatter unless consumers require a custom message format.
 -   **Numeric values in labels and properties will be converted to `double` during serialization** because that is the only numeric type supported by JSON. Large integers and floating-point values will lose precision. If you want the exact value preserved then log it as a string instead.
 -   GCP Error Reporting is separate from Cloud Logging and **will automatically capture error messages only if they have an `Exception` attached**. It is _not_ based on log severity level.
 -   View logs in the GCP Logs Explorer: https://console.cloud.google.com/logs/viewer
 
 ## Sink Options
+
+`batchSizeLimit` caps the number of events in a Serilog batch. The sink splits large batches to stay below the Cloud Logging request limit. When registered with `WriteTo.GoogleCloudLogging()`, it excludes confirmed chunks from retries and failure notifications, and resets that progress when Serilog drops the batch. Direct use of `GoogleCloudLoggingSink` does not track retry progress. A write whose outcome is unknown can still be retried.
+
+Malformed entries and entries that exceed the size limits are skipped without failing the batch. To receive individual skips and batch failures in `WriteTo.Fallible()` or `WriteTo.FallbackChain()`, register `WriteTo.GoogleCloudLogging()` as the only sink in the primary callback. Level restrictions, level switches, and `WriteTo.Conditional()` preserve forwarding; `WriteTo.Logger()` and callbacks with multiple sinks do not. By default, diagnostics go to `SelfLog`.
+
+In Serilog 4.4.0, shutdown can discard a batch waiting for retry if no new events are queued. Serilog reports only temporary failures, which `WriteTo.FallbackChain()` ignores, so those events never reach fallback.
+
+Set `queueLimit` to bound the number of queued events during slow writes. The default is unbounded; a full bounded queue drops new events, and the limit is a count, not a byte budget.
+
+If `SourceContext` has no valid log-name characters, the entry uses the default log name. If the default renderer encounters an invalid message format, it keeps the message template and structured properties.
 
 | Option                    | Description                                                                                                                                                                                                             |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

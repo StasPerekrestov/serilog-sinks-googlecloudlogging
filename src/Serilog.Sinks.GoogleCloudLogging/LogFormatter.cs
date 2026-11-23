@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Text.Encodings.Web;
 using System.Text.RegularExpressions;
@@ -7,6 +6,10 @@ using Google.Cloud.Logging.V2;
 using Google.Protobuf.WellKnownTypes;
 using Serilog.Events;
 using Serilog.Formatting;
+using Serilog.Parsing;
+#if NET8_0_OR_GREATER
+using System.Buffers;
+#endif
 
 namespace Serilog.Sinks.GoogleCloudLogging;
 
@@ -14,9 +17,10 @@ internal partial class LogFormatter
 {
     private readonly ITextFormatter? _textFormatter;
 
-    private static readonly Dictionary<string, string> LogNameCache = new(StringComparer.Ordinal);
-
     #if NET8_0_OR_GREATER
+    private static readonly SearchValues<char> UnescapedLogIdChars =
+        SearchValues.Create("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz._-");
+
     [GeneratedRegex("[^0-9A-Z._/-]+", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
     private static partial Regex LogNameUnsafeChars();
     #else 
@@ -31,6 +35,23 @@ internal partial class LogFormatter
 
     public string RenderEventMessage(LogEvent e, StringWriter writer)
     {
+        if (_textFormatter == null && e.Exception == null && e.MessageTemplate.Tokens is MessageTemplateToken[] tokens)
+        {
+            if (tokens.Length == 1)
+            {
+                if (tokens[0] is TextToken text)
+                    return text.Text;
+
+                if (tokens[0] is PropertyToken property && GetLiteralString(e, property) is { } literal)
+                    return literal;
+            }
+            else if (tokens.Length == 2 && tokens[0] is TextToken prefix && tokens[1] is PropertyToken tail &&
+                GetLiteralString(e, tail) is { } suffix)
+            {
+                return prefix.Text + suffix;
+            }
+        }
+
         writer.GetStringBuilder().Clear();
 
         // use formatter if provided
@@ -40,8 +61,16 @@ internal partial class LogFormatter
         }
         else
         {
-            // otherwise manually format message and handle exceptions
-            e.RenderMessage(writer);
+            try
+            {
+                e.RenderMessage(writer);
+            }
+            catch (FormatException)
+            {
+                Debugging.SelfLog.WriteLine("Could not render a log message due to an invalid format; using its message template.");
+                writer.GetStringBuilder().Clear();
+                writer.Write(e.MessageTemplate.Text);
+            }
 
             if (e.Exception != null)
             {
@@ -57,6 +86,11 @@ internal partial class LogFormatter
         return writer.ToString();
     }
 
+    private static string? GetLiteralString(LogEvent e, PropertyToken property) =>
+        property is { Format: "l", Alignment: null } &&
+        e.Properties.TryGetValue(property.PropertyName, out var value) &&
+        value is ScalarValue { Value: string literal } && value.GetType() == typeof(ScalarValue) ? literal : null;
+
     /// <summary>
     /// Writes event properties as a JSON object for a GCP log entry.
     /// </summary>
@@ -67,34 +101,29 @@ internal partial class LogFormatter
             jsonStruct.Fields.Add(propKey, value);
     }
 
-    private Value? CreatePropertyValue(LogEventPropertyValue propValue)
+    internal Value? CreatePropertyValue(LogEventPropertyValue propValue)
     {
         switch (propValue)
         {
-            case ScalarValue scalarValue when scalarValue.Value is null:
-                return Value.ForNull();
-
-            case ScalarValue scalarValue when scalarValue.Value is bool boolValue:
-                return Value.ForBool(boolValue);
-
-            case ScalarValue scalarValue when scalarValue.Value is short or ushort or int or uint or long or ulong or float or double or decimal:
-                // all numbers are converted to double and may lose precision
-                // numbers should be sent as strings if they do not fit in a double
-                return Value.ForNumber(Convert.ToDouble(scalarValue.Value));
-
-            case ScalarValue scalarValue when scalarValue.Value is string stringValue:
-                return Value.ForString(stringValue);
-
-            case ScalarValue scalarValue:
-                // handle all other scalar values as strings
-                return Value.ForString(scalarValue.Value?.ToString() ?? "");
+            case ScalarValue scalar:
+                return scalar.Value switch
+                {
+                    string text => Value.ForString(text),
+                    null => Value.ForNull(),
+                    bool boolean => Value.ForBool(boolean),
+                    short or ushort or int or uint or long or ulong or float or double or decimal =>
+                        Value.ForNumber(Convert.ToDouble(scalar.Value)),
+                    _ => Value.ForString(scalar.Value.ToString() ?? "")
+                };
 
             case SequenceValue sequenceValue:
                 var sequenceChild = new ListValue();
-                sequenceChild.Values.Capacity = sequenceValue.Elements.Count;
-                for (var i = 0; i < sequenceValue.Elements.Count; i++)
+                var elements = sequenceValue.Elements;
+                var count = elements.Count;
+                sequenceChild.Values.Capacity = count;
+                for (var i = 0; i < count; i++)
                 {
-                    var element = CreatePropertyValue(sequenceValue.Elements[i]);
+                    var element = CreatePropertyValue(elements[i]);
                     if (element != null)
                         sequenceChild.Values.Add(element);
                 }
@@ -103,8 +132,12 @@ internal partial class LogFormatter
 
             case StructureValue structureValue:
                 var structureChild = new Struct();
-                foreach (var childProperty in structureValue.Properties)
+                var properties = structureValue.Properties;
+                for (var i = 0; i < properties.Count; i++)
+                {
+                    var childProperty = properties[i];
                     WritePropertyAsJson(structureChild, childProperty.Name, childProperty.Value);
+                }
 
                 return Value.ForStruct(structureChild);
 
@@ -119,24 +152,22 @@ internal partial class LogFormatter
         return null;
     }
 
-    public static string CreateLogName(string projectId, string name)
+    public static string? CreateLogName(string projectId, string name) =>
+        EscapeLogId(name) is { } logId ? new LogName(projectId, logId).ToString() : null;
+
+    internal static string? EscapeLogId(string name)
     {
-        // cache log name to avoid formatting name for every statement
-        // TODO: potential memory leak because cached names are never cleared, however it shouldn't be an issue even with thousands of entries
-        if (!LogNameCache.TryGetValue(name, out var logName))
-        {
-            // name must only contain: letters, numbers, underscore, hyphen, forward slash, period
-            // limited to 512 characters and must be url-encoded (using 500 char limit here to be safe)
-            var safeChars = LogNameUnsafeChars().Replace(name, "");
-            var truncated = safeChars.Length > 500 ? safeChars.Substring(0, 500) : safeChars;
-            var encoded = UrlEncoder.Default.Encode(truncated);
+#if NET8_0_OR_GREATER
+        if (name.Length is > 0 and <= 500 && !name.AsSpan().ContainsAnyExcept(UnescapedLogIdChars))
+            return name;
+#endif
 
-            // LogName class creates templated string matching GCP requirements
-            logName = new LogName(projectId, encoded).ToString();
+        // Allow only valid characters, then truncate below 512 characters and URL-encode.
+        var safeChars = LogNameUnsafeChars().Replace(name, "");
+        if (safeChars.Length == 0)
+            return null;
 
-            LogNameCache.Add(name, logName);
-        }
-
-        return logName;
+        var truncated = safeChars.Length > 500 ? safeChars.Substring(0, 500) : safeChars;
+        return UrlEncoder.Default.Encode(truncated);
     }
 }
